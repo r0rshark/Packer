@@ -41,7 +41,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	//Encrypting data
 	DEBUG(("Entry Point Section before encrypting \n"));
 	printSectionInfo(ep_section);
-	encrypt(ep_section,0x01);
+	encrypt(ep_section,0x42);
 	DEBUG(("Entry Point Section after encrypting \n"));
 	printSectionInfo(ep_section);
 
@@ -53,6 +53,8 @@ int _tmain(int argc, _TCHAR* argv[])
 	DEBUG(("aOld entry point %x\n",pe.int_headers.OptionalHeader.AddressOfEntryPoint));
 	pe.int_headers.OptionalHeader.AddressOfEntryPoint = new_ep;
 	DEBUG(("aNew entry point %x\n",pe.int_headers.OptionalHeader.AddressOfEntryPoint));
+
+
 	
 
 	if (!pe_write(output_path, &pe)) {
@@ -109,6 +111,8 @@ int load_stub(PE *pe){
 	
 	//put stub inside .text section
 	int new_ep = insert_stub_section(stub_buffer,stub_size, pe);
+
+
 	return new_ep;
 	
 	
@@ -167,10 +171,13 @@ int insert_stub_section(char * buffer,int stub_size, PE *pe){
 		printSectionInfo(&pe->m_sections[i]);
 	}
 
-	//get the RVA of the section
+	//get the RVA of the section and edit characteristics
 	for(int i=number_of_sections-1;i>=0;i--) {//start from the last because the inserted one will be placed as last
 		if(strcmp((const char *)pe->m_sections[i].header.Name,".newtext")==0){
 			DEBUG(("Found inserted section named %s at rva %x\n",pe->m_sections[i].header.Name, pe->m_sections[i].header.VirtualAddress));
+			//setting correct virtual size
+			pe->m_sections[i].header.Misc.VirtualSize=stub_size+1;
+			pe->m_sections[i].header.Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
 			return pe->m_sections[i].header.VirtualAddress;
 		}
 	}
