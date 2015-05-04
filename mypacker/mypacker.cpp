@@ -13,6 +13,7 @@ void encrypt(isections *section, int val);
 int load_stub(PE *pe);
 int write_stub_file(char stub[],int size,char *temp_asm_path );
 int read_stub_file(char *filename,char **buffer);
+int insert_stub_section(char *stub,int stub_size, PE *pe);
 
 int _tmain(int argc, _TCHAR* argv[])
 {
@@ -25,33 +26,41 @@ int _tmain(int argc, _TCHAR* argv[])
 		printf("Wrong PE format\n");
 		return -1;
 	}
-	printf("PE has been read\n");
-
 	DWORD oep = pe.EntryPoint;
 	printf("OEP is %x",oep);
+	
 	//get the section containing the entry point
 	int ep_section_number = getEntryPointSection(&pe);
 	isections  *ep_section = &pe.m_sections[ep_section_number];
+	
 	//set the section writable	
 	DEBUG(("old Entry Point Section Characteristics %x\n",ep_section->header.Characteristics));
 	ep_section->header.Characteristics |= IMAGE_SCN_MEM_WRITE;
 	DEBUG(("new Entry Point Section Characteristics %x\n",pe.m_sections[0].header.Characteristics));
+	
 	//Encrypting data
-	DEBUG(("Entry Point Section before encrypting "));
+	DEBUG(("Entry Point Section before encrypting \n"));
 	printSectionInfo(ep_section);
 	encrypt(ep_section,0x01);
-	DEBUG(("Entry Point Section after encrypting "));
+	DEBUG(("Entry Point Section after encrypting \n"));
 	printSectionInfo(ep_section);
 
 	//reading decrypted hex from file
-	load_stub(&pe);
-/*
+	int new_ep = load_stub(&pe);
+	if(new_ep<0){DEBUG(("There was a problem in loading the stub into the PE"));return -1;}
+
+	//Changing program entry point
+	DEBUG(("aOld entry point %x\n",pe.int_headers.OptionalHeader.AddressOfEntryPoint));
+	pe.int_headers.OptionalHeader.AddressOfEntryPoint = new_ep;
+	DEBUG(("aNew entry point %x\n",pe.int_headers.OptionalHeader.AddressOfEntryPoint));
+	
+
 	if (!pe_write(output_path, &pe)) {
 		printf("Error in writing PE \n");
 		return 0;
 	}
 	printf("Encrypted PE successfully written in %s \n",output_path);
-*/
+
 	return 0;
 }
 
@@ -98,9 +107,15 @@ int load_stub(PE *pe){
 	printf("stub buffer %x , ",stub_buffer);
 	if(stub_size < 0 ){DEBUG(("Problem in reading the hexadecimal decrypter")); return -1;}
 	
-	for (int i=0;i< stub_size;i++){
-		printf("ar address %x value %d ",stub_buffer+i,*(stub_buffer+i));
+	//put stub inside .text section
+	int new_ep = insert_stub_section(stub_buffer,stub_size, pe);
+	return new_ep;
+	
+	
+	/*for (int i=0;i< stub_size;i++){
+		printf("%hx ",*(stub_buffer+i));
 		}
+		*/
 
 		
 
@@ -108,7 +123,7 @@ int load_stub(PE *pe){
 }
 
 int write_stub_file(char stub[],int size,char *temp_asm_path ){
-	FILE *asmFile = fopen(temp_asm_path, "w");
+	FILE *asmFile = fopen(temp_asm_path, "wb");
     if(!asmFile){
 		DEBUG(("Can't write temporary asm file %s\n",temp_asm_path));
         return -1;
@@ -119,7 +134,7 @@ int write_stub_file(char stub[],int size,char *temp_asm_path ){
 }
 
 int read_stub_file(char *filename,char **buffer){
-	FILE *decrypterFile = fopen(filename,"r");
+	FILE *decrypterFile = fopen(filename,"rb");
 	 if(!decrypterFile){
 		DEBUG(("Can't read hexadecial decrypter file created by yasm %s\n",filename));
         return -1;
@@ -136,15 +151,30 @@ int read_stub_file(char *filename,char **buffer){
 	
 
 	if (result != size) {DEBUG(("Reading error %s\n",filename));return -1;}
-	/*
-	for (int i=0;i< size;i++){
-		printf("at address %x value  ",*buffer[i]);
-		}
-		*/
 	// terminate
 	fclose (decrypterFile);
 	return size;
+}
 
+int insert_stub_section(char * buffer,int stub_size, PE *pe){
+	
+	AddSection(".newtext",buffer,stub_size,NULL,pe);
+
+	int number_of_sections=pe->int_headers.FileHeader.NumberOfSections;
+	for(int i=0;i<number_of_sections;i++){
+		DEBUG(("\n----------SECTION %d-------------\n",i));
+		DEBUG(("Section name %s\n",pe->m_sections[i].header.Name));
+		printSectionInfo(&pe->m_sections[i]);
+	}
+
+	//get the RVA of the section
+	for(int i=number_of_sections-1;i>=0;i--) {//start from the last because the inserted one will be placed as last
+		if(strcmp((const char *)pe->m_sections[i].header.Name,".newtext")==0){
+			DEBUG(("Found inserted section named %s at rva %x\n",pe->m_sections[i].header.Name, pe->m_sections[i].header.VirtualAddress));
+			return pe->m_sections[i].header.VirtualAddress;
+		}
+	}
+	return -1;
 
 }
 
